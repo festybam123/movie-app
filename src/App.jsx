@@ -22,9 +22,9 @@ function App() {
       </nav>
       <Routes>
         <Route path="/" element={
-          <div className="container" style={{ textAlign: 'center' }}>
-            <h1>Welcome to Movie App</h1>
-            <Link to="/movie" className="button favorite-button">
+          <div className="container">
+            <h1 style={{ fontSize: '2.5rem', marginBottom: '2rem', color: '#333' }}>Welcome to Movie App</h1>
+            <Link to="/movie" className="button favorite-button" style={{ padding: '15px 30px', fontSize: '1.2rem' }}>
               Browse Movies
             </Link>
           </div>

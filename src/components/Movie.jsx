@@ -1,64 +1,94 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import axios from 'axios'
 
-const API_KEY = '4316bb93d91bc6c0a48f44f46599f195';
+
+const API_KEY = import.meta.env.VITE_TMDB_KEY;
 const BASE_URL = 'https://api.themoviedb.org/3';
 
 function Movie({ onAddFavorite }) {
   const { id } = useParams();
   const [movies, setMovies] = useState([]);
   const [movie, setMovie] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
 
+  // Debounced search function with useCallback
+  const performSearch = React.useCallback(async (query) => {
+    if (!query.trim()) {
+      setIsSearching(false);
+      return;
+    }
+
+    try {
+      const response = await axios.get(
+        `${BASE_URL}/search/movie?api_key=${API_KEY}&language=en-US&query=${encodeURIComponent(query)}&page=1&include_adult=false`
+      );
+      
+      if (!response.data.results.length) {
+        setError('No movies found. Try different keywords.');
+        setMovies([]);
+      } else {
+        setMovies(response.data.results);
+        setError(null);
+      }
+    } catch (err) {
+      setError('Failed to search movies. Please try again.');
+      console.error(err);
+      setMovies([]);
+    }
+  }, []);
+
+  // Debounce hook
+  const useDebounce = (value, delay) => {
+    const [debouncedValue, setDebouncedValue] = useState(value);
+
+    useEffect(() => {
+      const handler = setTimeout(() => {
+        setDebouncedValue(value);
+      }, delay);
+
+      return () => {
+        clearTimeout(handler);
+      };
+    }, [value, delay]);
+
+    return debouncedValue;
+  };
+
   // Handle search input
   const handleSearch = (e) => {
-    setSearchQuery(e.target.value);
-    if (e.target.value.trim()) {
-      setIsSearching(true);
-    } else {
-      setIsSearching(false);
-    }
+    const value = e.target.value;
+    setSearchQuery(value);
+    setIsSearching(!!value.trim());
+    
+    // Reset error when input changes
+    if (error) setError(null);
   };
 
   const handleSubmit = (e) => {
     e.preventDefault();
     if (searchQuery.trim()) {
-      performSearch(searchQuery);
+      setLoading(true);
+      performSearch(searchQuery.trim()).finally(() => setLoading(false));
     }
   };
 
-  const performSearch = (query) => {
-    setLoading(true);
-    axios.get(`${BASE_URL}/search/movie?api_key=${API_KEY}&language=en-US&query=${encodeURIComponent(query)}&page=1&include_adult=false`)
-      .then(response => {
-        setMovies(response.data.results);
-        setMovie(null);
-        setError(null);
-        if (response.data.results.length === 0) {
-          setError('No movies found. Try different keywords.');
-        }
-      })
-      .catch(err => {
-        setError('Failed to search movies. Please try again.');
-        console.error(err);
-      })
-      .finally(() => setLoading(false));
-  };
+  // Use debounced search query
+  const debouncedSearchQuery = useDebounce(searchQuery, 300);
 
-  // Debounce search function
+  // State for search-in-progress
+  const [isSearchLoading, setIsSearchLoading] = useState(false);
+
+  // Effect for debounced search
   useEffect(() => {
-    const timeoutId = setTimeout(() => {
-      if (searchQuery && isSearching) {
-        performSearch(searchQuery);
-      }
-    }, 500); // Wait 500ms after user stops typing to make the API call
-
-    return () => clearTimeout(timeoutId);
-  }, [searchQuery]);
+    if (debouncedSearchQuery && isSearching) {
+      setIsSearchLoading(true);
+      performSearch(debouncedSearchQuery).finally(() => setIsSearchLoading(false));
+    }
+  }, [debouncedSearchQuery, isSearching, performSearch]);
 
   useEffect(() => {
     setLoading(true);
@@ -91,8 +121,9 @@ function Movie({ onAddFavorite }) {
     }
   }, [id, isSearching]);
 
-  if (loading) return <p className="loading">Loading...</p>;
-  if (error) return <p className="error-message">{error}</p>;
+  // Only show loading for initial page load or movie detail fetch
+  if (loading && !isSearching) return <p className="loading">Loading...</p>;
+  if (error && !movies.length) return <p className="error-message">{error}</p>;
 
   if (movie) {
     // Single movie detail view
@@ -157,59 +188,67 @@ function Movie({ onAddFavorite }) {
             type="submit"
             className="search-button"
             aria-label="Search"
+            disabled={isSearchLoading}
           >
-            🔍
+            {isSearchLoading ? '⌛' : '🔍'}
           </button>
         </div>
         {searchQuery && (
           <div className="search-helper-text">
-            Press Enter to search or wait for results to appear automatically
+            {isSearchLoading ? 'Searching...' : 'Press Enter to search or wait for results to appear automatically'}
           </div>
         )}
       </form>
-      <h1>{searchQuery ? 'Search Results' : 'Popular Movies'}</h1>
-      {movies.length === 0 && searchQuery && !loading && (
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <h1>{searchQuery ? 'Search Results' : 'Popular Movies'}</h1>
+        {isSearchLoading && (
+          <span className="search-status">Updating results...</span>
+        )}
+      </div>
+      {movies.length === 0 && searchQuery && !isSearchLoading && (
         <p className="error-message">No movies found for "{searchQuery}"</p>
       )}
       <div className="movie-grid">
         {movies.map(movie => (
-          <Link 
-            to={`/movie/${movie.id}`} 
-            key={movie.id}
-            className="movie-card"
-          >
-            <div>
-              <img
-                src={`https://image.tmdb.org/t/p/w500${movie.poster_path}`}
-                alt={movie.title}
-                className="movie-poster"
-                onError={(e) => { e.target.src = 'https://via.placeholder.com/300x450?text=No+Image'; }}
-              />
-              <div className="movie-info">
-                <h3 className="movie-title">{movie.title}</h3>
-                <p className="movie-year">{movie.release_date?.split('-')[0]}</p>
-                <p className="movie-rating">⭐ {movie.vote_average}/10</p>
-                <div className="action-buttons">
-                  <a
-                    href={`https://www.google.com/search?q=${encodeURIComponent(`${movie.title} ${movie.release_date?.split('-')[0]} movie`)}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="button small-button google-button"
-                  >
-                    🔍 Google
-                  </a>
-                  <a
-                    href={`https://www.youtube.com/results?search_query=${encodeURIComponent(`${movie.title} ${movie.release_date?.split('-')[0]} official trailer`)}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="button small-button youtube-button"
-                  >
-                    ▶️ Trailer
-                  </a>
+          <div key={movie.id} className="movie-card">
+            <div className="movie-content">
+              <Link to={`/movie/${movie.id}`}>
+                <img
+                  src={`https://image.tmdb.org/t/p/w500${movie.poster_path}`}
+                  alt={movie.title}
+                  className="movie-poster"
+                  onError={(e) => { e.target.src = 'https://via.placeholder.com/300x450?text=No+Image'; }}
+                />
+                <div className="movie-info">
+                  <h3 className="movie-title">{movie.title}</h3>
+                  <p className="movie-year">{movie.release_date?.split('-')[0]}</p>
+                  <p className="movie-rating">⭐ {movie.vote_average}/10</p>
                 </div>
+              </Link>
+              <div className="action-buttons">
+                <button
+                  onClick={() => window.open(
+                    `https://www.google.com/search?q=${encodeURIComponent(`${movie.title} ${movie.release_date?.split('-')[0]} movie`)}`,
+                    '_blank',
+                    'noopener,noreferrer'
+                  )}
+                  className="button small-button google-button"
+                >
+                  🔍 Google
+                </button>
+                <button
+                  onClick={() => window.open(
+                    `https://www.youtube.com/results?search_query=${encodeURIComponent(`${movie.title} ${movie.release_date?.split('-')[0]} official trailer`)}`,
+                    '_blank',
+                    'noopener,noreferrer'
+                  )}
+                  className="button small-button youtube-button"
+                >
+                  ▶️ Trailer
+                </button>
               </div>
             </div>
-          </Link>
+          </div>
         ))}
       </div>
     </div>
